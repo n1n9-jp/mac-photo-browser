@@ -8,7 +8,7 @@ import Combine
 
 @MainActor
 final class TagsViewModel: ObservableObject {
-    @Published private(set) var tags: [Tag] = []
+    @Published private(set) var tagsWithCount: [TagWithCount] = []
     @Published private(set) var isLoading = false
     @Published var error: Error?
     @Published var showingError = false
@@ -24,7 +24,7 @@ final class TagsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            tags = try await tagRepository.fetchAll()
+            tagsWithCount = try await tagRepository.fetchAllWithImageCount()
         } catch {
             self.error = error
             showingError = true
@@ -34,7 +34,7 @@ final class TagsViewModel: ObservableObject {
     func deleteTag(_ tag: Tag) async {
         do {
             try await tagRepository.delete(tag)
-            tags.removeAll { $0.id == tag.id }
+            tagsWithCount.removeAll { $0.tag.id == tag.id }
         } catch {
             self.error = error
             showingError = true

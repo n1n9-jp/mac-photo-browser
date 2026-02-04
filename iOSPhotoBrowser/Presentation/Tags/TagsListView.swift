@@ -17,7 +17,7 @@ struct TagsListView: View {
             Group {
                 if viewModel.isLoading {
                     ProgressView("読み込み中...")
-                } else if viewModel.tags.isEmpty {
+                } else if viewModel.tagsWithCount.isEmpty {
                     EmptyStateView(
                         icon: "tag",
                         title: "タグがありません",
@@ -44,18 +44,22 @@ struct TagsListView: View {
 
     private var tagsList: some View {
         List {
-            ForEach(viewModel.tags) { tag in
-                NavigationLink(value: tag) {
+            ForEach(viewModel.tagsWithCount) { tagWithCount in
+                NavigationLink(value: tagWithCount.tag) {
                     HStack {
                         Image(systemName: "tag.fill")
                             .foregroundColor(.blue)
-                        Text(tag.name)
+                        Text(tagWithCount.tag.name)
+                        Spacer()
+                        Text("\(tagWithCount.imageCount)枚")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
                 }
             }
             .onDelete { indexSet in
                 for index in indexSet {
-                    let tag = viewModel.tags[index]
+                    let tag = viewModel.tagsWithCount[index].tag
                     Task {
                         await viewModel.deleteTag(tag)
                     }

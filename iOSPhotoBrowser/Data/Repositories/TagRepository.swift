@@ -23,6 +23,19 @@ final class TagRepository: TagRepositoryProtocol {
         }
     }
 
+    func fetchAllWithImageCount() async throws -> [TagWithCount] {
+        try await context.perform {
+            let request = TagEntity.fetchRequest()
+            request.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+
+            let entities = try self.context.fetch(request)
+            return entities.map { entity in
+                let imageCount = (entity.images as? Set<ImageEntity>)?.count ?? 0
+                return TagWithCount(tag: self.toTag(entity), imageCount: imageCount)
+            }
+        }
+    }
+
     func fetch(byId id: UUID) async throws -> Tag? {
         try await context.perform {
             let request = TagEntity.fetchRequest()
