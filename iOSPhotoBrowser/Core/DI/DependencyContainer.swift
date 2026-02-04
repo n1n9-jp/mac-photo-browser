@@ -22,6 +22,8 @@ final class DependencyContainer {
     let permissionService = PermissionService.shared
     let photoLibraryService = PhotoLibraryService.shared
     let fileImportService = FileImportService.shared
+    let ocrService = OCRService.shared
+    let bookInfoService = BookInfoService.shared
 
     // MARK: - Repositories
     lazy var imageRepository: ImageRepositoryProtocol = ImageRepository(
@@ -31,6 +33,9 @@ final class DependencyContainer {
         context: coreDataStack.viewContext
     )
     lazy var albumRepository: AlbumRepositoryProtocol = AlbumRepository(
+        context: coreDataStack.viewContext
+    )
+    lazy var bookInfoRepository: BookInfoRepositoryProtocol = BookInfoRepository(
         context: coreDataStack.viewContext
     )
 
@@ -60,7 +65,10 @@ final class DependencyContainer {
             imageRepository: imageRepository,
             tagRepository: tagRepository,
             albumRepository: albumRepository,
-            deleteImageUseCase: deleteImageUseCase
+            bookInfoRepository: bookInfoRepository,
+            deleteImageUseCase: deleteImageUseCase,
+            ocrService: ocrService,
+            bookInfoService: bookInfoService
         )
     }
 
@@ -85,6 +93,10 @@ final class DependencyContainer {
 
     func makeSearchViewModel() -> SearchViewModel {
         SearchViewModel(imageRepository: imageRepository)
+    }
+
+    func makeExtractedTextsViewModel() -> ExtractedTextsViewModel {
+        ExtractedTextsViewModel(imageRepository: imageRepository)
     }
 
     private init() {}

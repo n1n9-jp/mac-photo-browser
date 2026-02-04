@@ -12,5 +12,7 @@ protocol ImageRepositoryProtocol {
     func update(_ image: PhotoItem) async throws
     func delete(_ image: PhotoItem) async throws
     func search(byTag tagName: String) async throws -> [PhotoItem]
+    func search(query: String) async throws -> [PhotoItem]
     func fetchImages(inAlbum albumId: UUID) async throws -> [PhotoItem]
+    func updateExtractedText(imageId: UUID, text: String, processedAt: Date) async throws
 }

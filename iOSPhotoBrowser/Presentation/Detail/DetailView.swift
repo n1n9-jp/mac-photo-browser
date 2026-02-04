@@ -35,6 +35,9 @@ struct DetailView: View {
                 }
 
                 if let photo = viewModel.photo {
+                    // Book Info Section
+                    bookInfoSection(photo: photo)
+
                     // Tags Section
                     tagsSection(photo: photo)
 
@@ -83,6 +86,15 @@ struct DetailView: View {
         }
         .sheet(isPresented: $viewModel.showingAlbumSelector) {
             albumSelectorSheet
+        }
+        .sheet(isPresented: $viewModel.showingBookInfoEditor) {
+            bookInfoEditorSheet
+        }
+        .sheet(isPresented: $viewModel.showingTitleSearchSheet) {
+            titleSearchSheet
+        }
+        .sheet(isPresented: $viewModel.showingSearchResults) {
+            searchResultsSheet
         }
         .alert("エラー", isPresented: $viewModel.showingError) {
             Button("OK") {}
@@ -174,6 +186,128 @@ struct DetailView: View {
         .padding()
         .background(Color.gray.opacity(0.1))
         .cornerRadius(12)
+    }
+
+    private func bookInfoSection(photo: PhotoItem) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("書誌情報")
+                    .font(.headline)
+
+                Spacer()
+
+                if viewModel.isProcessingOCR {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else if photo.hasBookInfo {
+                    Menu {
+                        Button {
+                            viewModel.startEditingBookInfo()
+                        } label: {
+                            Label("編集", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            Task {
+                                await viewModel.deleteBookInfo()
+                            }
+                        } label: {
+                            Label("削除", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                } else {
+                    Button {
+                        Task {
+                            await viewModel.performOCRAndFetchBookInfo()
+                        }
+                    } label: {
+                        Text("抽出")
+                            .font(.subheadline)
+                    }
+                }
+            }
+
+            if viewModel.isProcessingOCR {
+                HStack {
+                    Spacer()
+                    Text("処理中...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            } else if let bookInfo = photo.bookInfo {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let title = bookInfo.title {
+                        bookInfoRow("タイトル", value: title)
+                    }
+                    if let author = bookInfo.author {
+                        bookInfoRow("著者", value: author)
+                    }
+                    if let publisher = bookInfo.publisher {
+                        bookInfoRow("出版社", value: publisher)
+                    }
+                    bookInfoRow("ISBN", value: bookInfo.isbn)
+                    if let publishedDate = bookInfo.publishedDate, !publishedDate.isEmpty {
+                        bookInfoRow("出版日", value: publishedDate)
+                    }
+                    if let category = bookInfo.category {
+                        bookInfoRow("カテゴリ", value: category)
+                    }
+                }
+            } else if let message = viewModel.ocrMessage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    Button {
+                        viewModel.startTitleSearch()
+                    } label: {
+                        Label("タイトルで検索", systemImage: "magnifyingglass")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                Text("書誌情報がありません")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            if let extractedText = photo.extractedText, !extractedText.isEmpty, !photo.hasBookInfo {
+                DisclosureGroup("抽出テキスト") {
+                    Text(extractedText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.subheadline)
+
+                if viewModel.ocrMessage == nil {
+                    Button {
+                        viewModel.startTitleSearch()
+                    } label: {
+                        Label("タイトルで検索", systemImage: "magnifyingglass")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
+    }
+
+    private func bookInfoRow(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text(value)
+                .font(.subheadline)
+        }
     }
 
     private func metadataSection(photo: PhotoItem) -> some View {
@@ -295,6 +429,154 @@ struct DetailView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完了") {
                         viewModel.showingAlbumSelector = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var bookInfoEditorSheet: some View {
+        NavigationStack {
+            Form {
+                if let binding = Binding($viewModel.editingBookInfo) {
+                    Section("書誌情報") {
+                        TextField("タイトル", text: Binding(
+                            get: { binding.wrappedValue.title ?? "" },
+                            set: { binding.wrappedValue.title = $0.isEmpty ? nil : $0 }
+                        ))
+                        TextField("著者", text: Binding(
+                            get: { binding.wrappedValue.author ?? "" },
+                            set: { binding.wrappedValue.author = $0.isEmpty ? nil : $0 }
+                        ))
+                        TextField("出版社", text: Binding(
+                            get: { binding.wrappedValue.publisher ?? "" },
+                            set: { binding.wrappedValue.publisher = $0.isEmpty ? nil : $0 }
+                        ))
+                        TextField("出版日", text: Binding(
+                            get: { binding.wrappedValue.publishedDate ?? "" },
+                            set: { binding.wrappedValue.publishedDate = $0.isEmpty ? nil : $0 }
+                        ))
+                    }
+
+                    Section {
+                        Text("ISBN: \(binding.wrappedValue.isbn)")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("書誌情報を編集")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") {
+                        viewModel.showingBookInfoEditor = false
+                        viewModel.editingBookInfo = nil
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task {
+                            await viewModel.updateBookInfo()
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var titleSearchSheet: some View {
+        NavigationStack {
+            Form {
+                Section("検索キーワード") {
+                    TextField("タイトルや著者名を入力", text: $viewModel.searchKeyword)
+                        .textInputAutocapitalization(.never)
+                }
+
+                if let extractedText = viewModel.photo?.extractedText, !extractedText.isEmpty {
+                    Section("抽出テキスト（参考）") {
+                        Text(extractedText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("タイトルで検索")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") {
+                        viewModel.cancelTitleSearch()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if viewModel.isSearching {
+                        ProgressView()
+                    } else {
+                        Button("検索") {
+                            Task {
+                                await viewModel.searchByTitle()
+                            }
+                        }
+                        .disabled(viewModel.searchKeyword.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var searchResultsSheet: some View {
+        NavigationStack {
+            List {
+                if viewModel.searchResults.isEmpty {
+                    Text("検索結果がありません")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(viewModel.searchResults) { bookInfo in
+                        Button {
+                            Task {
+                                await viewModel.selectBookInfo(bookInfo)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(bookInfo.title ?? "タイトル不明")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                if let author = bookInfo.author {
+                                    Text(author)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                HStack {
+                                    if let publisher = bookInfo.publisher {
+                                        Text(publisher)
+                                    }
+                                    if !bookInfo.isbn.isEmpty {
+                                        Text("ISBN: \(bookInfo.isbn)")
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("検索結果")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") {
+                        viewModel.cancelTitleSearch()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("再検索") {
+                        viewModel.showingSearchResults = false
+                        viewModel.showingTitleSearchSheet = true
                     }
                 }
             }

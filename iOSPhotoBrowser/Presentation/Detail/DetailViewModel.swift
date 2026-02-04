@@ -19,24 +19,46 @@ final class DetailViewModel: ObservableObject {
     @Published var error: Error?
     @Published var showingError = false
 
+    // OCR関連
+    @Published private(set) var isProcessingOCR = false
+    @Published private(set) var ocrMessage: String?
+    @Published var showingBookInfoEditor = false
+    @Published var editingBookInfo: BookInfo?
+
+    // タイトル検索関連
+    @Published var showingTitleSearchSheet = false
+    @Published var showingSearchResults = false
+    @Published var searchKeyword = ""
+    @Published private(set) var searchResults: [BookInfo] = []
+    @Published private(set) var isSearching = false
+
     let photoId: UUID
     private let imageRepository: ImageRepositoryProtocol
     private let tagRepository: TagRepositoryProtocol
     private let albumRepository: AlbumRepositoryProtocol
+    private let bookInfoRepository: BookInfoRepositoryProtocol
     private let deleteImageUseCase: DeleteImageUseCase
+    private let ocrService: OCRService
+    private let bookInfoService: BookInfoService
 
     init(
         photoId: UUID,
         imageRepository: ImageRepositoryProtocol,
         tagRepository: TagRepositoryProtocol,
         albumRepository: AlbumRepositoryProtocol,
-        deleteImageUseCase: DeleteImageUseCase
+        bookInfoRepository: BookInfoRepositoryProtocol,
+        deleteImageUseCase: DeleteImageUseCase,
+        ocrService: OCRService,
+        bookInfoService: BookInfoService
     ) {
         self.photoId = photoId
         self.imageRepository = imageRepository
         self.tagRepository = tagRepository
         self.albumRepository = albumRepository
+        self.bookInfoRepository = bookInfoRepository
         self.deleteImageUseCase = deleteImageUseCase
+        self.ocrService = ocrService
+        self.bookInfoService = bookInfoService
     }
 
     func loadPhoto() async {
@@ -126,5 +148,134 @@ final class DetailViewModel: ObservableObject {
 
     func isInAlbum(_ album: Album) -> Bool {
         photo?.albums.contains { $0.id == album.id } ?? false
+    }
+
+    // MARK: - OCR & Book Info
+
+    func performOCRAndFetchBookInfo() async {
+        guard let image = loadImage() else {
+            ocrMessage = "画像の読み込みに失敗しました"
+            return
+        }
+
+        isProcessingOCR = true
+        ocrMessage = nil
+        defer { isProcessingOCR = false }
+
+        do {
+            // Step 1: OCR
+            let extractedText = try await ocrService.recognizeText(from: image)
+
+            // Save extracted text
+            try await imageRepository.updateExtractedText(
+                imageId: photoId,
+                text: extractedText,
+                processedAt: Date()
+            )
+
+            await loadPhoto()
+
+            // Step 2: Extract ISBN
+            if let isbn = await ocrService.extractISBN(from: extractedText) {
+                // ISBN found - try openBD API
+                if let bookInfo = try await bookInfoService.fetchBookInfo(isbn: isbn) {
+                    // Save book info
+                    try await bookInfoRepository.save(bookInfo, for: photoId)
+                    ocrMessage = nil
+                    await loadPhoto()
+                    return
+                } else {
+                    ocrMessage = "書誌情報が見つかりませんでした（ISBN: \(isbn)）"
+                }
+            }
+
+            // ISBN not found or book info not found - show title search sheet
+            ocrMessage = "ISBNが検出できませんでした。タイトルで検索してください。"
+            showingTitleSearchSheet = true
+
+        } catch {
+            self.error = error
+            showingError = true
+        }
+    }
+
+    func startEditingBookInfo() {
+        guard let bookInfo = photo?.bookInfo else { return }
+        editingBookInfo = bookInfo
+        showingBookInfoEditor = true
+    }
+
+    func updateBookInfo() async {
+        guard let bookInfo = editingBookInfo else { return }
+
+        do {
+            try await bookInfoRepository.update(bookInfo)
+            showingBookInfoEditor = false
+            editingBookInfo = nil
+            await loadPhoto()
+        } catch {
+            self.error = error
+            showingError = true
+        }
+    }
+
+    func deleteBookInfo() async {
+        do {
+            try await bookInfoRepository.delete(for: photoId)
+            await loadPhoto()
+        } catch {
+            self.error = error
+            showingError = true
+        }
+    }
+
+    // MARK: - Title Search
+
+    func startTitleSearch() {
+        searchKeyword = ""
+        searchResults = []
+        showingTitleSearchSheet = true
+    }
+
+    func searchByTitle() async {
+        let keyword = searchKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return }
+
+        isSearching = true
+        defer { isSearching = false }
+
+        do {
+            searchResults = try await bookInfoService.searchByTitle(keyword: keyword)
+            if searchResults.isEmpty {
+                ocrMessage = "「\(keyword)」に一致する書籍が見つかりませんでした"
+            } else {
+                showingTitleSearchSheet = false
+                showingSearchResults = true
+            }
+        } catch {
+            self.error = error
+            showingError = true
+        }
+    }
+
+    func selectBookInfo(_ bookInfo: BookInfo) async {
+        do {
+            try await bookInfoRepository.save(bookInfo, for: photoId)
+            showingSearchResults = false
+            searchResults = []
+            searchKeyword = ""
+            ocrMessage = nil
+            await loadPhoto()
+        } catch {
+            self.error = error
+            showingError = true
+        }
+    }
+
+    func cancelTitleSearch() {
+        showingTitleSearchSheet = false
+        showingSearchResults = false
+        searchResults = []
+        searchKeyword = ""
     }
 }

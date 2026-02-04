@@ -31,7 +31,8 @@ final class SearchViewModel: ObservableObject {
         defer { isSearching = false }
 
         do {
-            searchResults = try await imageRepository.search(byTag: query)
+            // Search in tags, extracted text, and book info (title, author, publisher, isbn)
+            searchResults = try await imageRepository.search(query: query)
         } catch {
             self.error = error
             showingError = true

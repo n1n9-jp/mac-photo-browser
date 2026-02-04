@@ -96,6 +96,42 @@ final class ImageRepository: ImageRepositoryProtocol {
         }
     }
 
+    func updateExtractedText(imageId: UUID, text: String, processedAt: Date) async throws {
+        try await context.perform {
+            let request = ImageEntity.fetchRequest()
+            request.predicate = NSPredicate(format: "id == %@", imageId as CVarArg)
+            request.fetchLimit = 1
+
+            guard let entity = try self.context.fetch(request).first else {
+                throw RepositoryError.notFound
+            }
+
+            entity.extractedText = text
+            entity.ocrProcessedAt = processedAt
+            try self.context.save()
+        }
+    }
+
+    func search(query: String) async throws -> [PhotoItem] {
+        try await context.perform {
+            let request = ImageEntity.fetchRequest()
+            // Search in: tags, extractedText, bookInfo (title, author, publisher, isbn)
+            let predicates: [NSPredicate] = [
+                NSPredicate(format: "ANY tags.name CONTAINS[cd] %@", query),
+                NSPredicate(format: "extractedText CONTAINS[cd] %@", query),
+                NSPredicate(format: "bookInfo.title CONTAINS[cd] %@", query),
+                NSPredicate(format: "bookInfo.author CONTAINS[cd] %@", query),
+                NSPredicate(format: "bookInfo.publisher CONTAINS[cd] %@", query),
+                NSPredicate(format: "bookInfo.isbn CONTAINS[cd] %@", query)
+            ]
+            request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: predicates)
+            request.sortDescriptors = [NSSortDescriptor(key: "importedAt", ascending: false)]
+
+            let entities = try self.context.fetch(request)
+            return entities.map { self.toPhotoItem($0) }
+        }
+    }
+
     // MARK: - Private Helpers
 
     private func toPhotoItem(_ entity: ImageEntity) -> PhotoItem {
@@ -118,6 +154,22 @@ final class ImageRepository: ImageRepositoryProtocol {
             )
         } ?? []
 
+        var bookInfo: BookInfo?
+        if let bookInfoEntity = entity.bookInfo {
+            bookInfo = BookInfo(
+                id: bookInfoEntity.id ?? UUID(),
+                isbn: bookInfoEntity.isbn ?? "",
+                title: bookInfoEntity.title,
+                author: bookInfoEntity.author,
+                publisher: bookInfoEntity.publisher,
+                publishedDate: bookInfoEntity.publishedDate,
+                coverUrl: bookInfoEntity.coverUrl,
+                category: bookInfoEntity.category,
+                createdAt: bookInfoEntity.createdAt ?? Date(),
+                updatedAt: bookInfoEntity.updatedAt ?? Date()
+            )
+        }
+
         return PhotoItem(
             id: entity.id ?? UUID(),
             fileName: entity.fileName ?? "",
@@ -134,7 +186,10 @@ final class ImageRepository: ImageRepositoryProtocol {
             cameraModel: entity.cameraModel,
             fileSize: entity.fileSize,
             tags: tags,
-            albums: albums
+            albums: albums,
+            extractedText: entity.extractedText,
+            ocrProcessedAt: entity.ocrProcessedAt,
+            bookInfo: bookInfo
         )
     }
 

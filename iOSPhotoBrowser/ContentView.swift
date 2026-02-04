@@ -28,6 +28,11 @@ struct ContentView: View {
                     Label("検索", systemImage: "magnifyingglass")
                 }
 
+            ExtractedTextsView()
+                .tabItem {
+                    Label("テキスト", systemImage: "doc.text")
+                }
+
             ImportView()
                 .tabItem {
                     Label("取り込み", systemImage: "square.and.arrow.down")
