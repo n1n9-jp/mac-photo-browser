@@ -7,6 +7,7 @@ import SwiftUI
 
 struct LibraryView: View {
     @StateObject private var viewModel: LibraryViewModel
+    @State private var showingImportSheet = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 4),
@@ -27,7 +28,7 @@ struct LibraryView: View {
                     EmptyStateView(
                         icon: "photo.on.rectangle.angled",
                         title: "写真がありません",
-                        message: "取り込みタブから写真を追加してください"
+                        message: "上部の「＋」ボタンから写真を追加してください"
                     )
                 } else {
                     photoGrid
@@ -35,6 +36,13 @@ struct LibraryView: View {
             }
             .navigationTitle("ライブラリ")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingImportSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     sortMenu
                 }
@@ -49,6 +57,14 @@ struct LibraryView: View {
                 Button("OK") {}
             } message: {
                 Text(viewModel.error?.localizedDescription ?? "不明なエラー")
+            }
+            .sheet(isPresented: $showingImportSheet) {
+                // Reload photos when sheet is dismissed
+                Task {
+                    await viewModel.loadPhotos()
+                }
+            } content: {
+                ImportView()
             }
         }
     }

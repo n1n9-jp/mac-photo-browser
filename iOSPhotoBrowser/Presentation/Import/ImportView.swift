@@ -8,6 +8,7 @@ import PhotosUI
 import UniformTypeIdentifiers
 
 struct ImportView: View {
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: ImportViewModel
     @State private var selectedItems: [PhotosPickerItem] = []
 
@@ -51,13 +52,15 @@ struct ImportView: View {
                 Text(viewModel.error?.localizedDescription ?? "不明なエラー")
             }
             .onChange(of: selectedItems) { _, newItems in
+                guard !newItems.isEmpty else { return }
                 Task {
-                    let results = newItems.compactMap { item -> PHPickerResult? in
-                        // Convert PhotosPickerItem to PHPickerResult workaround
-                        nil
-                    }
-                    // Use the new PhotosPicker API instead
-                    await importPhotosPickerItems(newItems)
+                    await viewModel.importFromPhotosPickerItems(newItems)
+                    selectedItems = []
+                }
+            }
+            .onChange(of: viewModel.shouldDismiss) { _, shouldDismiss in
+                if shouldDismiss {
+                    dismiss()
                 }
             }
         }
@@ -141,32 +144,5 @@ struct ImportView: View {
         .padding()
         .background(Color.gray.opacity(0.1))
         .cornerRadius(8)
-    }
-
-    private func importPhotosPickerItems(_ items: [PhotosPickerItem]) async {
-        guard !items.isEmpty else { return }
-
-        var importedData: [(Data, String)] = []
-
-        for item in items {
-            if let data = try? await item.loadTransferable(type: Data.self) {
-                let fileName = "image_\(UUID().uuidString).jpg"
-                importedData.append((data, fileName))
-            }
-        }
-
-        // Import all items
-        for (data, fileName) in importedData {
-            do {
-                _ = try await DependencyContainer.shared.importImageUseCase.execute(
-                    imageData: data,
-                    originalFileName: fileName
-                )
-            } catch {
-                print("Import error: \(error)")
-            }
-        }
-
-        selectedItems = []
     }
 }

@@ -15,6 +15,7 @@ final class ImportViewModel: ObservableObject {
     @Published private(set) var importProgress: Double = 0
     @Published private(set) var importedCount = 0
     @Published private(set) var failedCount = 0
+    @Published private(set) var shouldDismiss = false
     @Published var showingPhotoPicker = false
     @Published var showingFilePicker = false
     @Published var error: Error?
@@ -67,6 +68,12 @@ final class ImportViewModel: ObservableObject {
         }
 
         isImporting = false
+
+        // Auto-dismiss after short delay if import succeeded
+        if importedCount > 0 {
+            try? await Task.sleep(for: .milliseconds(800))
+            shouldDismiss = true
+        }
     }
 
     func importFromFiles(urls: [URL]) async {
@@ -92,6 +99,51 @@ final class ImportViewModel: ObservableObject {
         }
 
         isImporting = false
+
+        // Auto-dismiss after short delay if import succeeded
+        if importedCount > 0 {
+            try? await Task.sleep(for: .milliseconds(800))
+            shouldDismiss = true
+        }
+    }
+
+    func importFromPhotosPickerItems(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+
+        isImporting = true
+        importProgress = 0
+        importedCount = 0
+        failedCount = 0
+
+        let total = items.count
+
+        for (index, item) in items.enumerated() {
+            do {
+                if let data = try await item.loadTransferable(type: Data.self) {
+                    let fileName = "image_\(UUID().uuidString).jpg"
+                    _ = try await importImageUseCase.execute(
+                        imageData: data,
+                        originalFileName: fileName
+                    )
+                    importedCount += 1
+                } else {
+                    failedCount += 1
+                }
+            } catch {
+                failedCount += 1
+                print("Import error: \(error)")
+            }
+
+            importProgress = Double(index + 1) / Double(total)
+        }
+
+        isImporting = false
+
+        // Auto-dismiss after short delay if import succeeded
+        if importedCount > 0 {
+            try? await Task.sleep(for: .milliseconds(800))
+            shouldDismiss = true
+        }
     }
 
     private func loadImage(from provider: NSItemProvider) async throws -> UIImage {

@@ -32,11 +32,6 @@ struct ContentView: View {
                 .tabItem {
                     Label("テキスト", systemImage: "doc.text")
                 }
-
-            ImportView()
-                .tabItem {
-                    Label("取り込み", systemImage: "square.and.arrow.down")
-                }
         }
     }
 }
