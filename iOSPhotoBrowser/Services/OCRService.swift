@@ -180,6 +180,77 @@ actor OCRService {
 
         return rawText
     }
+
+    // MARK: - LLM統合による書籍情報抽出
+
+    /// OCR + LLMで画像から書籍情報を抽出
+    /// - Parameter image: 書籍の表紙や奥付の画像
+    /// - Returns: 抽出された書籍情報（タイトル、著者、ISBN等）と生のOCRテキスト
+    func extractBookInfoWithLLM(from image: UIImage) async throws -> (bookData: ExtractedBookData, rawText: String) {
+        // Step 1: OCRでテキスト抽出（補正付き）
+        let ocrText = try await recognizeTextWithCorrection(from: image)
+
+        // Step 2: LLMサービスが利用可能か確認
+        let llmAvailable = await LLMService.shared.isAnyServiceAvailable()
+
+        if llmAvailable {
+            // Step 3a: LLMで構造化データ抽出
+            let bookData = await LLMService.shared.extractBookInfoOrEmpty(from: ocrText)
+
+            // LLMの結果にISBNがない場合、正規表現でも試みる
+            var finalData = bookData
+            if finalData.isbn == nil {
+                finalData.isbn = extractISBN(from: ocrText)
+            }
+
+            return (finalData, ocrText)
+        } else {
+            // Step 3b: LLMなしの場合、ISBNのみ正規表現で抽出
+            let isbn = extractISBN(from: ocrText)
+            let bookData = ExtractedBookData(
+                title: nil,
+                author: nil,
+                publisher: nil,
+                isbn: isbn,
+                confidence: isbn != nil ? 0.5 : 0.0
+            )
+            return (bookData, ocrText)
+        }
+    }
+
+    /// LLMの利用可否に関わらず、最善の方法で書籍情報を抽出
+    func extractBookInfoBestEffort(from image: UIImage) async throws -> (bookData: ExtractedBookData, rawText: String, usedLLM: Bool) {
+        print("[OCRService] Starting extractBookInfoBestEffort...")
+
+        let ocrText = try await recognizeTextWithCorrection(from: image)
+        print("[OCRService] OCR completed. Text length: \(ocrText.count)")
+        print("[OCRService] OCR Text: \(ocrText.prefix(200))...")
+
+        let llmAvailable = await LLMService.shared.isAnyServiceAvailable()
+        print("[OCRService] LLM available: \(llmAvailable)")
+
+        if llmAvailable {
+            print("[OCRService] Calling LLM for extraction...")
+            let bookData = await LLMService.shared.extractBookInfoOrEmpty(from: ocrText)
+            var finalData = bookData
+
+            print("[OCRService] LLM result - Title: \(bookData.title ?? "nil"), Author: \(bookData.author ?? "nil"), ISBN: \(bookData.isbn ?? "nil"), Confidence: \(bookData.confidence)")
+
+            // ISBNがない場合は正規表現で補完
+            if finalData.isbn == nil {
+                finalData.isbn = extractISBN(from: ocrText)
+                print("[OCRService] ISBN from regex: \(finalData.isbn ?? "nil")")
+            }
+
+            return (finalData, ocrText, bookData.hasValidData)
+        } else {
+            // LLMなしの場合
+            print("[OCRService] LLM not available, using regex only")
+            let isbn = extractISBN(from: ocrText)
+            let bookData = ExtractedBookData(isbn: isbn, confidence: isbn != nil ? 0.3 : 0.0)
+            return (bookData, ocrText, false)
+        }
+    }
 }
 
 enum OCRError: Error, LocalizedError {

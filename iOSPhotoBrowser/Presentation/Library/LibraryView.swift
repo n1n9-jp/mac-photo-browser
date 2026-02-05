@@ -8,6 +8,7 @@ import SwiftUI
 struct LibraryView: View {
     @StateObject private var viewModel: LibraryViewModel
     @State private var showingImportSheet = false
+    @State private var showingSettings = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 4),
@@ -44,7 +45,14 @@ struct LibraryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    sortMenu
+                    HStack(spacing: 16) {
+                        sortMenu
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                    }
                 }
             }
             .task {
@@ -65,6 +73,9 @@ struct LibraryView: View {
                 }
             } content: {
                 ImportView()
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
             }
         }
     }

@@ -163,8 +163,8 @@ final class DetailViewModel: ObservableObject {
         defer { isProcessingOCR = false }
 
         do {
-            // Step 1: OCR（Apple Intelligence補正が利用可能なら自動適用）
-            let extractedText = try await ocrService.recognizeTextWithCorrection(from: image)
+            // Step 1: OCR + LLM（利用可能な場合）で書籍情報を抽出
+            let (bookData, extractedText, usedLLM) = try await ocrService.extractBookInfoBestEffort(from: image)
 
             // Save extracted text
             try await imageRepository.updateExtractedText(
@@ -175,17 +175,46 @@ final class DetailViewModel: ObservableObject {
 
             await loadPhoto()
 
-            // Step 2: Extract ISBN
-            if let isbn = await ocrService.extractISBN(from: extractedText) {
-                // ISBN found - try openBD API
-                if let bookInfo = try await bookInfoService.fetchBookInfo(isbn: isbn) {
-                    // Save book info
-                    try await bookInfoRepository.save(bookInfo, for: photoId)
-                    ocrMessage = nil
+            // Step 2: ISBNがある場合はopenBD APIで詳細情報を取得
+            if let isbn = bookData.isbn, bookData.hasValidISBN {
+                if let apiBookInfo = try await bookInfoService.fetchBookInfo(isbn: isbn) {
+                    // APIから取得した情報を保存
+                    try await bookInfoRepository.save(apiBookInfo, for: photoId)
+                    ocrMessage = usedLLM ? nil : "書誌情報を取得しました"
+                    await loadPhoto()
+                    return
+                } else if usedLLM && bookData.hasValidData {
+                    // APIで見つからなかったが、LLMがタイトル等を抽出した場合
+                    // LLMの結果を使って仮の書誌情報を作成
+                    let llmBookInfo = BookInfo(
+                        id: UUID(),
+                        isbn: isbn,
+                        title: bookData.title,
+                        author: bookData.author,
+                        publisher: bookData.publisher,
+                        publishedDate: nil,
+                        coverUrl: nil,
+                        category: nil,
+                        readingStatus: .unread,
+                        ownershipStatus: .notOwned,
+                        createdAt: Date(),
+                        updatedAt: Date()
+                    )
+                    try await bookInfoRepository.save(llmBookInfo, for: photoId)
+                    ocrMessage = "AIが抽出した情報を保存しました（API未確認）"
                     await loadPhoto()
                     return
                 } else {
                     ocrMessage = "書誌情報が見つかりませんでした（ISBN: \(isbn)）"
+                }
+            } else if usedLLM && bookData.hasValidData {
+                // ISBNはないが、LLMがタイトル等を抽出した場合
+                // タイトルで検索を提案、または直接保存
+                if let title = bookData.title {
+                    searchKeyword = title
+                    ocrMessage = "ISBNが検出できませんでした。タイトル「\(title)」で検索しますか？"
+                    showingTitleSearchSheet = true
+                    return
                 }
             }
 

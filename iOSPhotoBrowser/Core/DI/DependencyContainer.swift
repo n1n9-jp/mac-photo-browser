@@ -25,6 +25,9 @@ final class DependencyContainer {
     let ocrService = OCRService.shared
     let bookInfoService = BookInfoService.shared
 
+    // MARK: - LLM Services
+    let llmModelManager = LLMModelManager.shared
+
     // MARK: - Repositories
     lazy var imageRepository: ImageRepositoryProtocol = ImageRepository(
         context: coreDataStack.viewContext
