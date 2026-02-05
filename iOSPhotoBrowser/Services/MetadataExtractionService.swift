@@ -67,6 +67,8 @@ final class MetadataExtractionService {
         guard let dateString = dateString else { return nil }
 
         let formatter = DateFormatter()
+        // POSIX localeを使用してグレゴリオ暦を強制（システムカレンダー設定の影響を回避）
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
         return formatter.date(from: dateString)
     }
