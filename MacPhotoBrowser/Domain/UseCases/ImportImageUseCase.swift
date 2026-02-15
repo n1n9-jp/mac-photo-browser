@@ -65,10 +65,12 @@ final class ImportImageUseCase {
         try await imageRepository.save(photo)
 
         // 7. 非同期で自動タグ付けを実行（インポートをブロックしない）
+        // EXIF情報もAutoTaggingServiceに渡してメタデータベースのタグも生成
         let taggingService = autoTaggingService
         if let image = UIImage(data: imageData) {
+            let metadataForTagging = metadata
             Task.detached {
-                await taggingService.processImage(imageId: id, image: image)
+                await taggingService.processImage(imageId: id, image: image, metadata: metadataForTagging)
             }
         }
 
