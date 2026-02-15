@@ -44,8 +44,8 @@ actor CloudLLMService: LLMServiceProtocol {
     func extractTagsFromImage(_ image: UIImage) async throws -> ExtractedTagData {
         let apiKey = try await getAPIKey()
 
-        // 画像をbase64エンコード（高解像度でテキストを保持）
-        guard let resized = resizeImage(image, maxDimension: 1568),
+        // 画像をbase64エンコード（1024pxはVLMの推奨最大サイズ）
+        guard let resized = resizeImage(image, maxDimension: 1024),
               let imageData = resized.jpegData(compressionQuality: 0.92) else {
             throw LLMError.extractionFailed("画像のエンコードに失敗しました")
         }

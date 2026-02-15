@@ -6,6 +6,7 @@
 import Foundation
 import Vision
 import UIKit
+import CoreImage
 
 #if canImport(FoundationModels)
 import FoundationModels
@@ -14,14 +15,22 @@ import FoundationModels
 actor OCRService {
     static let shared = OCRService()
 
+    /// 信頼度のしきい値（これ未満のテキストは除外）
+    private let minimumConfidence: Float = 0.3
+
     private init() {}
 
     func recognizeText(from image: UIImage) async throws -> String {
-        guard let cgImage = image.cgImage else {
+        // 画像前処理でOCR精度を向上
+        let processedImage = preprocessImageForOCR(image)
+
+        guard let cgImage = processedImage.cgImage else {
             throw OCRError.invalidImage
         }
 
         return try await withCheckedThrowingContinuation { continuation in
+            let minConfidence = self.minimumConfidence
+
             let request = VNRecognizeTextRequest { request, error in
                 if let error = error {
                     continuation.resume(throwing: error)
@@ -33,8 +42,13 @@ actor OCRService {
                     return
                 }
 
-                let recognizedText = observations.compactMap { observation in
-                    observation.topCandidates(1).first?.string
+                // 信頼度フィルタリング: 低信頼度のテキストを除外
+                let recognizedText = observations.compactMap { observation -> String? in
+                    guard let candidate = observation.topCandidates(1).first,
+                          candidate.confidence >= minConfidence else {
+                        return nil
+                    }
+                    return candidate.string
                 }.joined(separator: "\n")
 
                 continuation.resume(returning: recognizedText)
@@ -52,6 +66,61 @@ actor OCRService {
                 continuation.resume(throwing: error)
             }
         }
+    }
+
+    // MARK: - Image Preprocessing
+
+    /// OCR精度向上のための画像前処理
+    /// - コントラスト補正
+    /// - シャープネス補正
+    /// - 向きの正規化
+    private func preprocessImageForOCR(_ image: UIImage) -> UIImage {
+        // 向きを正規化（EXIF orientationを適用）
+        let normalizedImage = normalizeOrientation(image)
+
+        guard let ciImage = CIImage(image: normalizedImage) else {
+            return normalizedImage
+        }
+
+        let context = CIContext()
+        var processedImage = ciImage
+
+        // コントラスト補正（テキストと背景の差を強調）
+        if let contrastFilter = CIFilter(name: "CIColorControls") {
+            contrastFilter.setValue(processedImage, forKey: kCIInputImageKey)
+            contrastFilter.setValue(1.15, forKey: kCIInputContrastKey)  // 軽いコントラスト強調
+            contrastFilter.setValue(0.0, forKey: kCIInputBrightnessKey)
+            if let output = contrastFilter.outputImage {
+                processedImage = output
+            }
+        }
+
+        // シャープネス補正（文字のエッジを強調）
+        if let sharpenFilter = CIFilter(name: "CISharpenLuminance") {
+            sharpenFilter.setValue(processedImage, forKey: kCIInputImageKey)
+            sharpenFilter.setValue(0.4, forKey: kCIInputSharpnessKey)
+            if let output = sharpenFilter.outputImage {
+                processedImage = output
+            }
+        }
+
+        guard let cgImage = context.createCGImage(processedImage, from: processedImage.extent) else {
+            return normalizedImage
+        }
+
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// EXIF orientationを適用して画像の向きを正規化
+    private func normalizeOrientation(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+
+        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        return normalizedImage ?? image
     }
 
     // MARK: - Apple Intelligence OCR補正

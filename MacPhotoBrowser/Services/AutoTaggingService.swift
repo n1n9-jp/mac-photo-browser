@@ -8,6 +8,7 @@
 import Foundation
 import UIKit
 import CoreLocation
+import NaturalLanguage
 
 actor AutoTaggingService {
     private let tagRepository: TagRepositoryProtocol
@@ -20,7 +21,8 @@ actor AutoTaggingService {
 
     /// 画像に対して自動タグ付けと説明文生成を実行
     /// 1. EXIF情報から即座にタグ付け（カメラ・季節・時間帯・場所）
-    /// 2. Cloud API → VLM → OCR+LLM のフォールバックチェーンでAIタグ付け
+    /// 2. 画像ベースAI（Cloud API → VLM）を優先試行
+    /// 3. 画像ベースが失敗した場合のみ OCR → 品質チェック → LLMでタグ付け
     func processImage(imageId: UUID, image: UIImage, metadata: ImageMetadata? = nil) async {
         print("[AutoTagging] Starting for image: \(imageId)")
 
@@ -35,30 +37,84 @@ actor AutoTaggingService {
             }
         }
 
-        // LLMで最適な方法でタグを抽出
-        var ocrText: String?
+        // --- 画像ベースAI抽出を最優先で試行 ---
+        var tagData = ExtractedTagData()
+        var imageBasedSuccess = false
 
-        // OCRテキストを事前に取得（LLMフォールバック用）
+        // Cloud APIで画像から直接抽出（最高精度）
+        if await LLMService.shared.isCloudAPIAvailable() {
+            do {
+                let result = try await LLMService.shared.extractTagsFromImageWithCloud(image)
+                if result.hasValidData {
+                    tagData = result
+                    imageBasedSuccess = true
+                    print("[AutoTagging] Image-based extraction succeeded (Cloud API)")
+                }
+            } catch {
+                print("[AutoTagging] Cloud API image extraction failed: \(error.localizedDescription)")
+            }
+        }
+
+        // VLMで画像から直接抽出
+        if !imageBasedSuccess, await LLMService.shared.isVLMAvailable() {
+            let result = await LLMService.shared.extractTagsFromImageOrEmpty(image)
+            if result.hasValidData {
+                tagData = result
+                imageBasedSuccess = true
+                print("[AutoTagging] Image-based extraction succeeded (VLM)")
+            }
+        }
+
+        // --- OCRテキスト抽出（常に実行して保存用、Apple Intelligence補正付き） ---
+        var ocrText: String?
         do {
-            ocrText = try await OCRService.shared.recognizeText(from: image)
+            ocrText = try await OCRService.shared.recognizeTextWithCorrection(from: image)
             if let text = ocrText, !text.isEmpty {
-                // OCRテキストも保存
                 try await imageRepository.updateExtractedText(
                     imageId: imageId,
                     text: text,
                     processedAt: Date()
                 )
                 print("[AutoTagging] OCR text saved: \(text.prefix(100))...")
+
+                // ハッシュタグを検出して即座にタグ化（SNS投稿画像等）
+                let hashtags = extractHashtags(from: text)
+                for tag in hashtags {
+                    guard validateTag(tag) else { continue }
+                    await addTag(tag, to: imageId)
+                }
+                if !hashtags.isEmpty {
+                    print("[AutoTagging] Hashtags extracted: \(hashtags.joined(separator: ", "))")
+                }
+
+                // OCRテキストからキーワード（名詞・固有名詞）を直接抽出してタグ化
+                // LLMに頼らず、自然言語処理で確実にタグを生成
+                let keywords = extractKeywordsFromOCR(text)
+                for keyword in keywords {
+                    guard validateTag(keyword) else { continue }
+                    await addTag(keyword, to: imageId)
+                }
+                if !keywords.isEmpty {
+                    print("[AutoTagging] OCR keywords extracted: \(keywords.joined(separator: ", "))")
+                }
             }
         } catch {
             print("[AutoTagging] OCR failed: \(error.localizedDescription)")
         }
 
-        // タグ抽出（最適な方法を自動選択）
-        let tagData = await LLMService.shared.extractTagsBestMethod(
-            image: image,
-            ocrText: ocrText
-        )
+        // --- 画像ベースが失敗した場合のみ、OCRテキストからLLMでタグ付け ---
+        if !imageBasedSuccess {
+            if let text = ocrText, isOCRTextUsable(text) {
+                print("[AutoTagging] Falling back to OCR+LLM (text length: \(text.count))")
+                let result = await LLMService.shared.extractTagsOrEmpty(from: text)
+                if result.hasValidData {
+                    tagData = result
+                    print("[AutoTagging] OCR+LLM extraction succeeded")
+                }
+            } else {
+                print("[AutoTagging] OCR text not usable for LLM tagging, skipping")
+            }
+        }
 
         guard tagData.hasValidData else {
             print("[AutoTagging] No valid tags extracted")
@@ -67,8 +123,12 @@ actor AutoTaggingService {
 
         print("[AutoTagging] Extracted \(tagData.tags.count) tags, description: \(tagData.description?.prefix(50) ?? "nil")")
 
-        // タグを保存
+        // タグを保存（バリデーション付き）
         for tagName in tagData.tags {
+            guard validateTag(tagName) else {
+                print("[AutoTagging] Tag rejected by validation: '\(tagName)'")
+                continue
+            }
             await addTag(tagName, to: imageId)
         }
 
@@ -87,6 +147,110 @@ actor AutoTaggingService {
         }
 
         print("[AutoTagging] Completed for image: \(imageId)")
+    }
+
+    // MARK: - Hashtag Extraction
+
+    /// OCRテキストからハッシュタグ（#タグ）を抽出してタグ名のリストを返す
+    /// 例: "#風景 #Tokyo #写真好きな人と繋がりたい" → ["風景", "tokyo"]
+    private func extractHashtags(from text: String) -> [String] {
+        // #（半角）と＃（全角）の両方に対応
+        // ハッシュタグの後に続く文字列（スペース・改行まで）を抽出
+        let pattern = "[#＃]([\\p{L}\\p{N}_]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+
+        var tags: [String] = []
+        var seen = Set<String>()
+
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: text) else { continue }
+            let tag = String(text[range])
+            let normalized = tag.lowercased()
+
+            // 重複除外、バリデーション通過のもののみ
+            guard !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            tags.append(tag)
+        }
+
+        return tags
+    }
+
+    // MARK: - OCR Keyword Extraction
+
+    /// OCRテキストから名詞・固有名詞をNLTaggerで抽出し、タグ候補として返す
+    /// LLM不要で確実にキーワードを取得できる
+    private func extractKeywordsFromOCR(_ text: String) -> [String] {
+        var keywords: [String] = []
+        var seen = Set<String>()
+
+        // NLTaggerで品詞タグ付け（日本語・英語対応）
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+
+        let options: NLTagger.Options = [.omitWhitespace, .omitPunctuation, .joinNames]
+
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex,
+            unit: .word,
+            scheme: .lexicalClass,
+            options: options
+        ) { tag, range in
+            guard let tag = tag else { return true }
+
+            // 名詞・固有名詞・その他の名詞的要素を抽出
+            let isRelevant = tag == .noun || tag == .placeName || tag == .personalName || tag == .organizationName
+            guard isRelevant else { return true }
+
+            let word = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // 2文字以上のキーワードのみ
+            guard word.count >= 2 else { return true }
+
+            let normalized = word.lowercased()
+            guard !seen.contains(normalized) else { return true }
+            seen.insert(normalized)
+
+            keywords.append(word)
+            return true
+        }
+
+        // 上位5個に絞る（多すぎるタグを防止）
+        return Array(keywords.prefix(5))
+    }
+
+    // MARK: - OCR Quality Gate
+
+    /// OCRテキストがLLMタグ付けに十分な品質かチェック
+    private func isOCRTextUsable(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 最低10文字以上（短すぎると推測が不安定）
+        guard trimmed.count >= 10 else { return false }
+        // 意味のある文字が30%以上含まれているか（記号やゴミだけではないか）
+        let letterCount = trimmed.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+        return Double(letterCount) / Double(trimmed.count) > 0.3
+    }
+
+    // MARK: - Tag Validation
+
+    /// タグ名の妥当性を検証（ゴミタグ・無意味なタグを除外）
+    private func validateTag(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 2文字未満は除外
+        guard trimmed.count >= 2 else { return false }
+        // 20文字超は除外（タグとして長すぎる）
+        guard trimmed.count <= 20 else { return false }
+        // 文字（ひらがな・カタカナ・漢字・英字）を含むこと（数字・記号のみは不可）
+        let hasLetters = trimmed.unicodeScalars.contains { CharacterSet.letters.contains($0) }
+        guard hasLetters else { return false }
+        // 既知のゴミパターンを除外
+        let junkPatterns = ["タグ", "タグ1", "タグ2", "タグ3", "tag", "tag1", "tag2", "tag3",
+                            "不明", "unknown", "その他", "none", "null", "n/a", "写真", "画像",
+                            "image", "photo", "picture"]
+        guard !junkPatterns.contains(trimmed.lowercased()) else { return false }
+        return true
     }
 
     // MARK: - EXIF Metadata Tag Extraction
@@ -188,11 +352,70 @@ actor AutoTaggingService {
         }
     }
 
+    // MARK: - Synonym Normalization
+
+    /// 同義語・表記揺れの正規化テーブル
+    /// key: 正規化前（lowercased）, value: 正規化後
+    private static let synonymMap: [String: String] = [
+        // 英語→日本語（よく出現する基本語彙）
+        "cat": "猫", "cats": "猫",
+        "dog": "犬", "dogs": "犬",
+        "flower": "花", "flowers": "花",
+        "tree": "木", "trees": "木",
+        "mountain": "山", "mountains": "山",
+        "ocean": "海", "sea": "海",
+        "river": "川",
+        "sky": "空",
+        "sun": "太陽", "sunset": "夕焼け", "sunrise": "朝焼け",
+        "moon": "月",
+        "snow": "雪",
+        "rain": "雨",
+        "food": "料理", "meal": "料理",
+        "building": "建物", "buildings": "建物",
+        "car": "車", "cars": "車",
+        "train": "電車",
+        "bridge": "橋",
+        "temple": "寺", "shrine": "神社",
+        "park": "公園",
+        "beach": "海岸",
+        "forest": "森",
+        "night": "夜景",
+        "city": "街並み", "cityscape": "街並み",
+        "person": "人物", "people": "人物",
+        "child": "子供", "children": "子供",
+        "baby": "赤ちゃん",
+        "bird": "鳥", "birds": "鳥",
+        "fish": "魚",
+        "restaurant": "レストラン",
+        "cafe": "カフェ", "coffee": "コーヒー",
+        // カタカナ→漢字・統一表記
+        "ネコ": "猫", "ねこ": "猫",
+        "イヌ": "犬", "いぬ": "犬",
+        "ヤマ": "山", "やま": "山",
+        "ウミ": "海", "うみ": "海",
+        "ソラ": "空", "そら": "空",
+        "ハナ": "花", "はな": "花",
+        // 類義語統一
+        "海辺": "海岸", "浜辺": "海岸", "ビーチ": "海岸",
+        "夕暮れ": "夕焼け", "夕日": "夕焼け",
+        "朝日": "朝焼け",
+        "お寺": "寺", "寺院": "寺",
+        "お店": "店舗", "ショップ": "店舗",
+    ]
+
+    /// タグ名を同義語テーブルで正規化
+    private func normalizeSynonym(_ name: String) -> String {
+        let lowered = name.lowercased()
+        return Self.synonymMap[lowered] ?? name
+    }
+
     // MARK: - Helper
 
-    /// タグ名を正規化して保存
+    /// タグ名を正規化して保存（同義語正規化 + lowercased + trim）
     private func addTag(_ tagName: String, to imageId: UUID) async {
-        let normalizedName = tagName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmed = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let synonymNormalized = normalizeSynonym(trimmed)
+        let normalizedName = synonymNormalized.lowercased()
         guard !normalizedName.isEmpty else { return }
 
         let tag = Tag(name: normalizedName)

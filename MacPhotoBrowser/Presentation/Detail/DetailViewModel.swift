@@ -147,7 +147,23 @@ final class DetailViewModel: ObservableObject {
         isProcessingAI = true
         defer { isProcessingAI = false }
 
-        await autoTaggingService.processImage(imageId: photoId, image: image)
+        // 既存のphoto情報からメタデータを構築してAutoTaggingServiceに渡す
+        var metadata: ImageMetadata?
+        if let photo = photo {
+            metadata = ImageMetadata(
+                width: photo.width,
+                height: photo.height,
+                orientation: photo.orientation,
+                capturedAt: photo.capturedAt,
+                latitude: photo.latitude,
+                longitude: photo.longitude,
+                cameraMake: photo.cameraMake,
+                cameraModel: photo.cameraModel,
+                fileSize: photo.fileSize
+            )
+        }
+
+        await autoTaggingService.processImage(imageId: photoId, image: image, metadata: metadata)
         await loadPhoto()
         NotificationCenter.default.post(name: .tagsDidChange, object: nil)
     }

@@ -36,7 +36,13 @@ actor AppleFoundationModelsService: LLMServiceProtocol {
         print("[AppleIntelligence] Starting tag extraction...")
         print("[AppleIntelligence] OCR Text length: \(ocrText.count) characters")
 
-        let prompt = TaggingPrompts.userPromptForOCR(ocrText)
+        // システムプロンプトのルールをユーザープロンプトに結合
+        // （Apple Intelligence はシステムロールを直接サポートしないため）
+        let prompt = """
+        \(TaggingPrompts.system)
+
+        \(TaggingPrompts.userPromptForOCR(ocrText))
+        """
 
         do {
             if session == nil {
