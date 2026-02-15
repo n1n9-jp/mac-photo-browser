@@ -37,9 +37,11 @@ struct TagImagesView: View {
                                     .onTapGesture(count: 2) {
                                         navigationPath.append(photo)
                                     }
-                                    .onTapGesture(count: 1) {
-                                        selectedPhotoId = photo.id
-                                    }
+                                    .simultaneousGesture(
+                                        TapGesture(count: 1).onEnded {
+                                            selectedPhotoId = photo.id
+                                        }
+                                    )
                             }
                         }
                         .padding(4)
@@ -53,6 +55,11 @@ struct TagImagesView: View {
         }
         .task {
             await loadPhotos()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tagsDidChange)) { _ in
+            Task {
+                await loadPhotos()
+            }
         }
     }
 

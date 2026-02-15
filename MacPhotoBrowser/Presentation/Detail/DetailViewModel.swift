@@ -7,6 +7,11 @@ import Foundation
 import Combine
 import UIKit
 
+extension Notification.Name {
+    static let tagsDidChange = Notification.Name("tagsDidChange")
+    static let albumsDidChange = Notification.Name("albumsDidChange")
+}
+
 @MainActor
 final class DetailViewModel: ObservableObject {
     @Published private(set) var photo: PhotoItem?
@@ -65,6 +70,7 @@ final class DetailViewModel: ObservableObject {
             try await tagRepository.addTag(tag, to: photoId)
             await loadPhoto()
             newTagName = ""
+            NotificationCenter.default.post(name: .tagsDidChange, object: nil)
         } catch {
             self.error = error
             showingError = true
@@ -75,6 +81,7 @@ final class DetailViewModel: ObservableObject {
         do {
             try await tagRepository.removeTag(tag, from: photoId)
             await loadPhoto()
+            NotificationCenter.default.post(name: .tagsDidChange, object: nil)
         } catch {
             self.error = error
             showingError = true
@@ -112,6 +119,7 @@ final class DetailViewModel: ObservableObject {
         do {
             try await albumRepository.addImage(photoId, to: album.id)
             await loadPhoto()
+            NotificationCenter.default.post(name: .albumsDidChange, object: nil)
         } catch {
             self.error = error
             showingError = true
@@ -122,6 +130,7 @@ final class DetailViewModel: ObservableObject {
         do {
             try await albumRepository.removeImage(photoId, from: album.id)
             await loadPhoto()
+            NotificationCenter.default.post(name: .albumsDidChange, object: nil)
         } catch {
             self.error = error
             showingError = true
@@ -140,5 +149,6 @@ final class DetailViewModel: ObservableObject {
 
         await autoTaggingService.processImage(imageId: photoId, image: image)
         await loadPhoto()
+        NotificationCenter.default.post(name: .tagsDidChange, object: nil)
     }
 }

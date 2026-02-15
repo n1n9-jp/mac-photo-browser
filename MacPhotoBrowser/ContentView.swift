@@ -81,6 +81,7 @@ struct ContentView: View {
                             Task {
                                 try? await DependencyContainer.shared.albumRepository.addImage(photoId, to: album.id)
                                 await albumsViewModel.loadAlbums()
+                                NotificationCenter.default.post(name: .albumsDidChange, object: nil)
                             }
                             return true
                         } isTargeted: { isTargeted in
@@ -138,6 +139,7 @@ struct ContentView: View {
                             Task {
                                 try? await DependencyContainer.shared.tagRepository.addTag(tagWithCount.tag, to: photoId)
                                 await tagsViewModel.loadTags()
+                                NotificationCenter.default.post(name: .tagsDidChange, object: nil)
                             }
                             return true
                         } isTargeted: { isTargeted in

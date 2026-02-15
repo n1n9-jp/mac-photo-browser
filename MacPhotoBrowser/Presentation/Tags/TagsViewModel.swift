@@ -14,9 +14,19 @@ final class TagsViewModel: ObservableObject {
     @Published var showingError = false
 
     private let tagRepository: TagRepositoryProtocol
+    private var cancellables = Set<AnyCancellable>()
 
     init(tagRepository: TagRepositoryProtocol) {
         self.tagRepository = tagRepository
+
+        NotificationCenter.default.publisher(for: .tagsDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { [weak self] in
+                    await self?.loadTags()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func loadTags() async {

@@ -61,9 +61,11 @@ struct AlbumDetailView: View {
                         .onTapGesture(count: 2) {
                             navigationPath.append(photo)
                         }
-                        .onTapGesture(count: 1) {
-                            selectedPhotoId = photo.id
-                        }
+                        .simultaneousGesture(
+                            TapGesture(count: 1).onEnded {
+                                selectedPhotoId = photo.id
+                            }
+                        )
                         .contextMenu {
                             Button(role: .destructive) {
                                 Task {

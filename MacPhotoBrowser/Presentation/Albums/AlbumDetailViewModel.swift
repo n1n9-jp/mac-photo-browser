@@ -16,6 +16,7 @@ final class AlbumDetailViewModel: ObservableObject {
     let album: Album
     private let albumRepository: AlbumRepositoryProtocol
     private let imageRepository: ImageRepositoryProtocol
+    private var cancellables = Set<AnyCancellable>()
 
     init(
         album: Album,
@@ -25,6 +26,15 @@ final class AlbumDetailViewModel: ObservableObject {
         self.album = album
         self.albumRepository = albumRepository
         self.imageRepository = imageRepository
+
+        NotificationCenter.default.publisher(for: .albumsDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { [weak self] in
+                    await self?.loadPhotos()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func loadPhotos() async {
@@ -43,6 +53,7 @@ final class AlbumDetailViewModel: ObservableObject {
         do {
             try await albumRepository.removeImage(photo.id, from: album.id)
             photos.removeAll { $0.id == photo.id }
+            NotificationCenter.default.post(name: .albumsDidChange, object: nil)
         } catch {
             self.error = error
             showingError = true
