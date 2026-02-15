@@ -9,46 +9,48 @@ struct DetailView: View {
     @StateObject private var viewModel: DetailViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var image: UIImage?
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var lastMagnifyScale: CGFloat = 1.0
+    @State private var imageOffset: CGSize = .zero
+    @State private var lastDragOffset: CGSize = .zero
+
+    private let minZoom: CGFloat = 0.5
+    private let maxZoom: CGFloat = 5.0
 
     init(photoId: UUID) {
         _viewModel = StateObject(wrappedValue: DependencyContainer.shared.makeDetailViewModel(photoId: photoId))
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Image
-                if let image = image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .cornerRadius(12)
-                } else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay {
-                            ProgressView()
-                        }
-                        .cornerRadius(12)
+        VStack(spacing: 0) {
+            // Image area
+            zoomableImageView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.05))
+                .clipped()
+                .draggable(viewModel.photo?.id.uuidString ?? "")
+
+            // Zoom slider bar
+            zoomSliderBar
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.bar)
+
+            Divider()
+
+            // Info sections
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if let photo = viewModel.photo {
+                        aiDescriptionSection(photo: photo)
+                        tagsSection(photo: photo)
+                        albumsSection(photo: photo)
+                        metadataSection(photo: photo)
+                    }
                 }
-
-                if let photo = viewModel.photo {
-                    // AI Description Section
-                    aiDescriptionSection(photo: photo)
-
-                    // Tags Section
-                    tagsSection(photo: photo)
-
-                    // Albums Section
-                    albumsSection(photo: photo)
-
-                    // Metadata Section
-                    metadataSection(photo: photo)
-                }
+                .padding()
             }
-            .padding()
+            .frame(maxHeight: 300)
         }
         .navigationTitle("詳細")
         .toolbar {
@@ -92,6 +94,147 @@ struct DetailView: View {
             Text(viewModel.error?.localizedDescription ?? "不明なエラー")
         }
     }
+
+    // MARK: - Zoomable Image
+
+    private func clampedOffset(in size: CGSize) -> CGSize {
+        guard zoomScale > 1.0 else { return .zero }
+        let maxOffsetX = (size.width * (zoomScale - 1)) / 2
+        let maxOffsetY = (size.height * (zoomScale - 1)) / 2
+        return CGSize(
+            width: min(max(imageOffset.width, -maxOffsetX), maxOffsetX),
+            height: min(max(imageOffset.height, -maxOffsetY), maxOffsetY)
+        )
+    }
+
+    private var zoomableImageView: some View {
+        GeometryReader { geometry in
+            let currentOffset = clampedOffset(in: geometry.size)
+
+            Group {
+                if let image = image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .overlay {
+                            ProgressView()
+                        }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .scaleEffect(zoomScale, anchor: .center)
+            .offset(currentOffset)
+            .contentShape(Rectangle())
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        let newScale = lastMagnifyScale * value.magnification
+                        zoomScale = min(max(newScale, minZoom), maxZoom)
+                    }
+                    .onEnded { _ in
+                        lastMagnifyScale = zoomScale
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            imageOffset = clampedOffset(in: geometry.size)
+                        }
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard zoomScale > 1.0 else { return }
+                        imageOffset = CGSize(
+                            width: lastDragOffset.width + value.translation.width,
+                            height: lastDragOffset.height + value.translation.height
+                        )
+                    }
+                    .onEnded { _ in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            imageOffset = clampedOffset(in: geometry.size)
+                        }
+                        lastDragOffset = clampedOffset(in: geometry.size)
+                    }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    if zoomScale > 1.05 {
+                        zoomScale = 1.0
+                        imageOffset = .zero
+                        lastDragOffset = .zero
+                    } else {
+                        zoomScale = 2.5
+                    }
+                    lastMagnifyScale = zoomScale
+                }
+            }
+            .onChange(of: zoomScale) { _, newValue in
+                if newValue <= 1.0 {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        imageOffset = .zero
+                        lastDragOffset = .zero
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Zoom Slider
+
+    private var zoomSliderBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    zoomScale = max(zoomScale - 0.25, minZoom)
+                    lastMagnifyScale = zoomScale
+                }
+            } label: {
+                Image(systemName: "minus.magnifyingglass")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            Slider(value: $zoomScale, in: minZoom...maxZoom)
+                .frame(maxWidth: 200)
+                .onChange(of: zoomScale) { _, newValue in
+                    lastMagnifyScale = newValue
+                }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    zoomScale = min(zoomScale + 0.25, maxZoom)
+                    lastMagnifyScale = zoomScale
+                }
+            } label: {
+                Image(systemName: "plus.magnifyingglass")
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+                .frame(height: 16)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    zoomScale = 1.0
+                    lastMagnifyScale = 1.0
+                }
+            } label: {
+                Text("1:1")
+                    .font(.caption.monospaced())
+                    .foregroundColor(abs(zoomScale - 1.0) < 0.01 ? .accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+
+            Text("\(Int(zoomScale * 100))%")
+                .font(.caption.monospaced())
+                .foregroundColor(.secondary)
+                .frame(width: 44, alignment: .trailing)
+        }
+    }
+
+    // MARK: - Info Sections
 
     private func aiDescriptionSection(photo: PhotoItem) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -297,6 +440,8 @@ struct DetailView: View {
         return formatter.string(from: date)
     }
 
+    // MARK: - Sheets
+
     private var tagEditorSheet: some View {
         NavigationStack {
             Form {
@@ -306,7 +451,7 @@ struct DetailView: View {
                 }
             }
             .navigationTitle("タグを追加")
-                        .toolbar {
+            .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") {
                         viewModel.showingTagEditor = false
@@ -323,7 +468,7 @@ struct DetailView: View {
                 }
             }
         }
-            }
+    }
 
     private var albumSelectorSheet: some View {
         NavigationStack {
@@ -357,7 +502,7 @@ struct DetailView: View {
                 }
             }
             .navigationTitle("アルバムに追加")
-                        .toolbar {
+            .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完了") {
                         viewModel.showingAlbumSelector = false
@@ -365,7 +510,7 @@ struct DetailView: View {
                 }
             }
         }
-            }
+    }
 }
 
 // Simple FlowLayout for tags

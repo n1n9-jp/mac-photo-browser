@@ -17,6 +17,8 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @StateObject private var albumsViewModel = DependencyContainer.shared.makeAlbumsViewModel()
     @StateObject private var tagsViewModel = DependencyContainer.shared.makeTagsViewModel()
+    @State private var dropTargetAlbumId: UUID?
+    @State private var dropTargetTagId: UUID?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -69,6 +71,21 @@ struct ContentView: View {
                     Label(album.name, systemImage: "rectangle.stack.fill")
                         .badge(albumsViewModel.albumImageCounts[album.id] ?? 0)
                         .tag(SidebarItem.album(album))
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(dropTargetAlbumId == album.id ? Color.accentColor.opacity(0.2) : Color.clear)
+                        )
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let uuidString = items.first,
+                                  let photoId = UUID(uuidString: uuidString) else { return false }
+                            Task {
+                                try? await DependencyContainer.shared.albumRepository.addImage(photoId, to: album.id)
+                                await albumsViewModel.loadAlbums()
+                            }
+                            return true
+                        } isTargeted: { isTargeted in
+                            dropTargetAlbumId = isTargeted ? album.id : nil
+                        }
                         .contextMenu {
                             Button(role: .destructive) {
                                 Task { await albumsViewModel.deleteAlbum(album) }
@@ -111,6 +128,21 @@ struct ContentView: View {
                     Label(tagWithCount.tag.name, systemImage: "tag.fill")
                         .badge(tagWithCount.imageCount)
                         .tag(SidebarItem.tag(tagWithCount.tag))
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(dropTargetTagId == tagWithCount.tag.id ? Color.accentColor.opacity(0.2) : Color.clear)
+                        )
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let uuidString = items.first,
+                                  let photoId = UUID(uuidString: uuidString) else { return false }
+                            Task {
+                                try? await DependencyContainer.shared.tagRepository.addTag(tagWithCount.tag, to: photoId)
+                                await tagsViewModel.loadTags()
+                            }
+                            return true
+                        } isTargeted: { isTargeted in
+                            dropTargetTagId = isTargeted ? tagWithCount.tag.id : nil
+                        }
                         .contextMenu {
                             Button(role: .destructive) {
                                 Task { await tagsViewModel.deleteTag(tagWithCount.tag) }

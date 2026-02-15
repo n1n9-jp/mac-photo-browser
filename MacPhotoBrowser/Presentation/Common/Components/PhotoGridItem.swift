@@ -33,6 +33,7 @@ struct PhotoGridItem: View {
                 .stroke(Color.accentColor, lineWidth: isSelected ? 3 : 0)
         )
         .shadow(color: isSelected ? Color.accentColor.opacity(0.4) : .clear, radius: 4)
+        .draggable(photo.id.uuidString)
         .task {
             loadThumbnail()
         }
