@@ -259,7 +259,7 @@ VLMが有効な場合、詳細画面の「書誌情報を抽出」ボタンを�
 
 ```
 コピー元: ~/Desktop/MiniCPM-o-demo-iOS/MiniCPM-V-demo/thirdparty/llama.xcframework
-コピー先: iOSPhotoBrowser/iOSPhotoBrowser/thirdparty/llama.xcframework
+コピー先: MacPhotoBrowser/MacPhotoBrowser/thirdparty/llama.xcframework
 ```
 
 含まれるプラットフォーム:
@@ -274,7 +274,7 @@ VLMが有効な場合、詳細画面の「書誌情報を抽出」ボタンを�
 ### 2. MTMDWrapper のコピー・統合
 
 ```
-コピー先: iOSPhotoBrowser/iOSPhotoBrowser/Services/VLM/MTMDWrapper/
+コピー先: MacPhotoBrowser/MacPhotoBrowser/Services/VLM/MTMDWrapper/
 ```
 
 ファイル構成:
@@ -293,7 +293,7 @@ VLMが有効な場合、詳細画面の「書誌情報を抽出」ボタンを�
 
 ### 4. VLMService の実装
 
-`iOSPhotoBrowser/Services/LLM/VLMService.swift`:
+`MacPhotoBrowser/Services/LLM/VLMService.swift`:
 - MTMDWrapperを使用した画像からの書籍情報抽出
 - 画像を一時ファイルに保存してMTMDWrapperに渡す
 - JSON形式のレスポンスをパースしてExtractedBookDataを返す
@@ -310,7 +310,7 @@ VLMが有効な場合、詳細画面の「書誌情報を抽出」ボタンを�
 
 ### 6. 設定画面の更新
 
-`iOSPhotoBrowser/Presentation/Settings/LLMSettingsView.swift`:
+`MacPhotoBrowser/Presentation/Settings/LLMSettingsView.swift`:
 - VLMモデルの状態表示（ダウンロード済み/未ダウンロード）
 - HuggingFaceへのダウンロードリンク
 - VLMモデル削除機能
@@ -319,8 +319,8 @@ VLMが有効な場合、詳細画面の「書誌情報を抽出」ボタンを�
 ## ファイル構成
 
 ```
-iOSPhotoBrowser/
-├── iOSPhotoBrowser/
+MacPhotoBrowser/
+├── MacPhotoBrowser/
 │   ├── thirdparty/
 │   │   └── llama.xcframework/          # VLM対応フレームワーク
 │   └── Services/
