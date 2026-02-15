@@ -50,7 +50,8 @@ final class DependencyContainer {
         autoTaggingService: autoTaggingService
     )
     lazy var deleteImageUseCase = DeleteImageUseCase(
-        imageRepository: imageRepository
+        imageRepository: imageRepository,
+        tagRepository: tagRepository
     )
 
     // MARK: - ViewModels

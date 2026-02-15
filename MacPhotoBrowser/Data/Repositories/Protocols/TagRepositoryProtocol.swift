@@ -14,6 +14,8 @@ protocol TagRepositoryProtocol {
     func delete(_ tag: Tag) async throws
     func addTag(_ tag: Tag, to imageId: UUID) async throws
     func removeTag(_ tag: Tag, from imageId: UUID) async throws
+    /// 画像が1枚も紐づいていない孤立タグを一括削除
+    func deleteOrphanedTags() async throws
 }
 
 struct TagWithCount: Identifiable {

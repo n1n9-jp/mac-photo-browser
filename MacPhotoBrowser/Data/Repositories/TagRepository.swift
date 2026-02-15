@@ -138,7 +138,32 @@ final class TagRepository: TagRepositoryProtocol {
             }
 
             imageEntity.removeFromTags(tagEntity)
+
+            // タグに紐づく画像が0件になったら自動削除
+            let remainingCount = (tagEntity.images as? Set<ImageEntity>)?.count ?? 0
+            if remainingCount == 0 {
+                self.context.delete(tagEntity)
+                print("[TagRepository] Auto-deleted orphaned tag: \(tagEntity.name ?? "")")
+            }
+
             try self.context.save()
+        }
+    }
+
+    func deleteOrphanedTags() async throws {
+        try await context.perform {
+            let request = TagEntity.fetchRequest()
+            // images が空（0件）のタグを取得
+            request.predicate = NSPredicate(format: "images.@count == 0")
+
+            let orphanedEntities = try self.context.fetch(request)
+            guard !orphanedEntities.isEmpty else { return }
+
+            for entity in orphanedEntities {
+                self.context.delete(entity)
+            }
+            try self.context.save()
+            print("[TagRepository] Deleted \(orphanedEntities.count) orphaned tags")
         }
     }
 
